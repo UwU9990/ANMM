@@ -1,0 +1,7 @@
+{
+  "content": {
+    "version": "1.0.0",
+    "server-message": "",
+    "update-message": "Your version of ANMM {version} is out of date!/nPlease update it by re-running the script."
+  }
+}
