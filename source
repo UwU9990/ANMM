@@ -1,0 +1,463 @@
+-- THE FUCKASS LIBRARY I MADE FOR THIS SHIT --
+
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/UwU9990/AzbithsSimpleROBLOXModMenus/refs/heads/main/SimpleGuiLibrary.lua"))()
+
+-- SERVICES --
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- MY BS LOCAL VARS --
+
+local currentVersion = "1.0.0"
+local lastServerMessage = ""
+local checkInterval = 15
+local statusUrl = "https://raw.githubusercontent.com/UwU9990/ANMM/refs/heads/main/status"
+local player = Players.LocalPlayer
+
+-- NOCLIP/FLIGHT HANDLER --
+
+local noclipEnabled = false
+local flyEnabled = false
+
+local flySpeed = 50
+local flyMult = 3.0
+local flightPos = nil
+
+local keysDown = {}
+
+local savedCollide = {}
+
+UserInputService.InputBegan:Connect(function(input)
+	if UserInputService:GetFocusedTextBox() then return end
+	if input.UserInputType == Enum.UserInputType.Keyboard then
+		keysDown[input.KeyCode] = true
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Keyboard then
+		keysDown[input.KeyCode] = nil
+	end
+end)
+
+local function getCharacter()
+	return player.Character or workspace:FindFirstChild(player.Name)
+end
+
+local function setCharacterNoclip(char, state)
+	if not char then return end
+	for _, part in ipairs(char:GetDescendants()) do
+		if part:IsA("BasePart") then
+			if state then
+				if savedCollide[part] == nil then
+					savedCollide[part] = part.CanCollide
+				end
+				part.CanCollide = false
+			else
+				if savedCollide[part] ~= nil then
+					part.CanCollide = savedCollide[part]
+					savedCollide[part] = nil
+				end
+			end
+		end
+	end
+end
+
+local function setCharacterFly(char, state)
+	if not char then return end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local root = char:FindFirstChild("HumanoidRootPart")
+	if hum then
+		hum.PlatformStand = state
+	end
+	if root then
+		root.Anchored = state
+		root.Velocity = Vector3.new(0, 0, 0)
+		if state then
+			flightPos = root.Position
+		end
+	end
+end
+
+local function enforceNoclip()
+	if noclipEnabled then
+		setCharacterNoclip(getCharacter(), true)
+	end
+end
+
+RunService.Stepped:Connect(enforceNoclip)
+RunService.Heartbeat:Connect(enforceNoclip)
+
+RunService.RenderStepped:Connect(function(dt)
+	if not flyEnabled then return end
+
+	local cam = workspace.CurrentCamera
+	local char = getCharacter()
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not cam or not root or not hum then return end
+
+	hum.PlatformStand = true
+	root.Anchored = true
+
+	if not flightPos then
+		flightPos = root.Position
+	end
+
+	local pressed = {}
+	for _, input in ipairs(UserInputService:GetKeysPressed()) do
+		pressed[input.KeyCode] = true
+	end
+
+	local camCF = cam.CFrame
+	local forward = camCF.LookVector
+	local right = camCF.RightVector
+	local up = Vector3.new(0, 1, 0)
+
+	local moveDelta = Vector3.new(0, 0, 0)
+	if pressed[Enum.KeyCode.W] then moveDelta = moveDelta + forward end
+	if pressed[Enum.KeyCode.S] then moveDelta = moveDelta - forward end
+	if pressed[Enum.KeyCode.D] then moveDelta = moveDelta + right end
+	if pressed[Enum.KeyCode.A] then moveDelta = moveDelta - right end
+	if pressed[Enum.KeyCode.Space] then moveDelta = moveDelta + up end
+	if pressed[Enum.KeyCode.LeftControl] then moveDelta = moveDelta - up end
+
+	local currentSpeed = flySpeed
+	if pressed[Enum.KeyCode.LeftShift] then
+		currentSpeed = currentSpeed * flyMult
+	end
+
+	flightPos = flightPos + (moveDelta * currentSpeed * dt)
+	root.CFrame = CFrame.new(flightPos) * (camCF - camCF.Position)
+end)
+
+-- FUNCTIONS --
+
+local function notify(title, message, time)
+	local events = ReplicatedStorage:WaitForChild("Events")
+	local notifyBindable = events:WaitForChild("NotifyBindable")
+
+	if notifyBindable then
+		notifyBindable:Fire(title, message, time)
+	end
+end
+
+-- SERVER STATUS HANDLER --
+
+local function checkStatus()
+	local fetchSuccess, response = pcall(function()
+		-- print("Checking server...")
+		return game:HttpGet(statusUrl .. "?t=" .. tostring(os.time()))
+	end)
+
+	if not fetchSuccess or not response or response == "" then
+		-- print("Failed to fetch server...")
+		return
+	end
+    -- print("Fetched server status...")
+
+	local decodeSuccess, data = pcall(function()
+		return HttpService:JSONDecode(response)
+	end)
+
+	if not decodeSuccess or type(data) ~= "table" or type(data.content) ~= "table" then
+		return
+	end
+
+	local content = data.content
+	local remoteVersion = content.version
+	local serverMessage = content["server-message"]
+	local updateMessage = content["update-message"]
+
+	if remoteVersion and remoteVersion ~= currentVersion then
+		local msg = updateMessage or ("Your version of ANMM " .. currentVersion .. " is out of date!")
+		msg = msg:gsub("{version}", currentVersion)
+
+		notify("Update Available", msg)
+	end
+
+	if serverMessage and serverMessage ~= "" and serverMessage ~= lastServerMessage then
+		local formattedServerMsg = serverMessage
+		notify("Server", formattedServerMsg)
+		lastServerMessage = serverMessage
+	end
+end
+
+task.spawn(function()
+	checkStatus()
+	while task.wait(checkInterval) do
+		checkStatus()
+	end
+end)
+
+-- MENU SETUP --
+
+local window = Library:CreateWindow({
+	Title = "AZBITH'S NULLSCAPE MOD MENU",
+	Width = 275,
+	Height = 340,
+}, function(window)
+	
+	-- FUCKASS STATUS THREAD GET'S CLOSED --
+
+	window:OnClose(function()
+        task.cancel(statusThread)
+    end)
+
+    -- SUBMENU SETUP --
+
+    local world = window:AddSubMenu("WORLD", Color3.fromRGB(80, 80, 40))
+    local movement = window:AddSubMenu("MOVEMENT", Color3.fromRGB(0, 80, 80))
+    local hitbox = window:AddSubMenu("HITBOX", Color3.fromRGB(127, 40, 63))
+    local debug = window:AddSubMenu("DEBUG", Color3.fromRGB(63, 63, 63))
+
+    -- TOGGLES --
+
+    local printEnabled = false
+    local hitboxSizeZeroOne = false
+    local hitboxVisible = false
+    local hitboxDisabled = false
+    local HITBOX_PART_NAMES = { -- This guy stands out
+        "Hitbox",
+        "HumanoidRootPart",
+        "Head",
+        "Left Arm",
+        "Left Leg",
+        "Right Arm",
+        "Right Leg",
+        "Torso",
+    }
+
+    local savedHitboxProps = {} -- This guy too
+    local killVoidVisible = false
+    local beaconVisible = false
+
+    -- DEBUG --
+
+    debug:AddToggle("PRINT HITBOX POS", false, function(enabled)
+        printEnabled = enabled
+        print("Print Hitbox Pos:", enabled)
+
+        while printEnabled do
+            local char = player.Character
+            local hitbox = char and char:FindFirstChild("Hitbox")
+            if hitbox then
+                print(hitbox.Position)
+            end
+            task.wait(0.1)
+        end
+    end)
+
+    debug:AddButton("TEST NOTIFY", Color3.fromRGB(63, 63, 63), function()
+        local char = player.Character
+
+        notify("Test", "Hello " .. char.Name .. "!\nThis is a example of a notification.")
+    end)
+
+    debug:AddButton("TEST STATUS", Color3.fromRGB(63, 63, 63), function()
+        local success, response = pcall(function()
+            return game:HttpGet("https://raw.githubusercontent.com/UwU9990/ANMM/refs/heads/main/status-debug")
+        end)
+
+        if success and response and response ~= "" then
+            notify("Server", response)
+        else
+            notify("Server", "Server status failed to fetch!")
+        end
+    end)
+
+    -- HITBOX --
+
+    hitbox:AddToggle("HITBOX SIZE ZERO*", false, function(enabled)
+        hitboxSizeZeroOne = enabled
+        print("Hitbox Size Zero*:", enabled)
+
+        if hitboxSizeZeroOne then
+            while hitboxSizeZeroOne do
+                local char = player.Character
+                local hitboxPart = char and char:FindFirstChild("Hitbox")
+                if hitboxPart then
+                    hitboxPart.Size = Vector3.new(0, 0, 0)
+                end
+                task.wait(0.1)
+            end
+        else
+            local char = player.Character
+            local hitboxPart = char and char:FindFirstChild("Hitbox")
+            if hitboxPart then
+                hitboxPart.Size = Vector3.new(3, 2, 2)
+            end
+        end
+    end)
+
+    hitbox:AddToggle("HITBOX VISIBLE", false, function(enabled)
+        hitboxVisible = enabled
+        print("Hitbox Visibility:", enabled)
+
+        local char = player.Character
+        local hitboxPart = char and char:FindFirstChild("Hitbox")
+        if hitboxPart then
+            hitboxPart.Transparency = hitboxVisible and 0 or 1
+        end
+    end)
+
+    local function setHitboxDisabled(char, state)
+        if not char then return end
+
+        for _, name in ipairs(HITBOX_PART_NAMES) do
+            local part = char:FindFirstChild(name)
+            if part and part:IsA("BasePart") then
+                if state then
+                    if not savedHitboxProps[part] then
+                        savedHitboxProps[part] = {
+                            CanTouch = part.CanTouch,
+                            CanQuery = part.CanQuery,
+                        }
+                    end
+                    part.CanTouch = false
+                    part.CanQuery = false
+                elseif savedHitboxProps[part] then
+                    local saved = savedHitboxProps[part]
+                    part.CanTouch = saved.CanTouch
+                    part.CanQuery = saved.CanQuery
+                    savedHitboxProps[part] = nil
+                end
+            end
+        end
+    end
+    
+    local function setEnemyClientEventsPaused(paused)
+        local enemies = workspace:FindFirstChild("Enemies")
+        if not enemies then return end
+
+        local fromName = paused and "ClientEvents" or "ClientEventsPaused"
+        local toName = paused and "ClientEventsPaused" or "ClientEvents"
+
+        for _, enemy in ipairs(enemies:GetChildren()) do
+            for _, child in ipairs(enemy:GetChildren()) do
+                if child.Name == fromName then
+                    child.Name = toName
+                end
+            end
+        end
+    end
+
+    local enemiesFolder = workspace:FindFirstChild("Enemies")
+    if enemiesFolder then
+        window:Connect(enemiesFolder.ChildAdded, function(enemy)
+            if not hitboxDisabled then return end
+            local events = enemy:WaitForChild("ClientEvents", 2)
+            if events then
+                events.Name = "ClientEventsPaused"
+            end
+        end)
+    end
+
+    hitbox:AddToggle("DISABLE HITBOX", false, function(enabled)
+        hitboxDisabled = enabled
+        print("Disable Hitbox:", enabled)
+        setHitboxDisabled(getCharacter(), enabled)
+        setEnemyClientEventsPaused(enabled)
+    end)
+
+    -- WORLD --
+
+    world:AddToggle("KILLVOID VISIBLE", false, function(enabled)
+        killVoidVisible = enabled
+        print("KillVoid Visibility:", enabled)
+
+        local killVoidPart = workspace:FindFirstChild("KillVoid")
+        if killVoidPart then
+            killVoidPart.Transparency = killVoidVisible and 0 or 1
+        end
+    end)
+
+    world:AddToggle("BEACON VISIBLE", false, function(enabled)
+        beaconVisible = enabled
+        print("Beacon Visibility:", enabled)
+
+        local beaconPart = workspace:FindFirstChild("Beacon")
+        if beaconPart then
+            beaconPart:SetAttribute("Beacon", beaconVisible)
+        end
+    end)
+
+    -- MOVEMENT --
+
+    movement:AddToggle("NOCLIP", false, function(enabled)
+        noclipEnabled = enabled
+        local char = getCharacter()
+        print("Noclip:", enabled, "Char:", char)
+        if not enabled and char then
+            setCharacterNoclip(char, false)
+        end
+        --[[
+        local char = getCharacter()
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if root then
+            root.CanCollide = false
+            print("Root CanCollide immediately after:", root.CanCollide)
+        end
+
+        for _, part in ipairs(getCharacter():GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                print("Still collidable:", part.Name)
+            end
+        end
+        ]]
+    end)
+
+    movement:AddToggle("FLY", false, function(enabled)
+        flyEnabled = enabled
+        print("Flight:", enabled)
+        setCharacterFly(getCharacter(), enabled)
+    end)
+
+    window:Connect(player.CharacterAdded, function(char)
+        local hitboxPart = char:WaitForChild("Hitbox", 5)
+        if hitboxPart then
+            hitboxPart.Size = hitboxSizeZeroOne and Vector3.new(0, 0, 0) or Vector3.new(3, 2, 2)
+            hitboxPart.Transparency = hitboxVisible and 0 or 1
+        end
+
+        savedHitboxProps = {}
+        savedCollide = {}
+        flightPos = nil
+
+        char:WaitForChild("HumanoidRootPart", 5)
+        char:WaitForChild("Humanoid", 5)
+
+        if hitboxDisabled then
+            setHitboxDisabled(char, true)
+        end
+        if noclipEnabled then
+            setCharacterNoclip(char, true)
+        end
+        if flyEnabled then
+            setCharacterFly(char, true)
+        end
+    end)
+
+    local function hookEnemiesFolder(folder)
+        if not folder then return end
+        window:Connect(folder.ChildAdded, function(enemy)
+            if not hitboxDisabled then return end
+            local events = enemy:WaitForChild("ClientEvents", 2)
+            if events then
+                events.Name = "ClientEventsPaused"
+            end
+        end)
+    end
+
+    hookEnemiesFolder(workspace:FindFirstChild("Enemies"))
+    window:Connect(workspace.ChildAdded, function(child)
+        if child.Name == "Enemies" then
+            hookEnemiesFolder(child)
+        end
+    end)
+
+end)
